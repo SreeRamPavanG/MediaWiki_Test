@@ -1,0 +1,6 @@
+---
+- name: Mediawiki configuration
+  hosts: mediawiki
+  become: yes
+  roles:
+    - install

@@ -1,0 +1,128 @@
+---
+- name: Install epel and remi repo from internet 
+  yum: 
+    name: 
+    - "{{ epel_release_url }}"
+    - "{{ remi_release_url }}"
+    
+- name: Get the remi key
+  get_url: 
+    url: "{{ remi_key_url }}" 
+    dest: /etc/pki/rpm-gpg/RPM-GPG-KEY-remi
+
+- name: Install the dependencies
+  yum:
+    name: "{{ item }}"
+    state: present
+    enablerepo: "remi-{{ php_version }},epel"
+  with_items: "{{ packages }}"
+
+- name: Start db
+  service:
+    name: mariadb
+    enabled: yes
+    state: started
+
+#mysql_secure_installation
+- name: Secure_mysql
+  include_role:
+    name: secure_mysql
+
+- name: Create wiki user
+  mysql_user:
+    name: wiki
+    password: "{{ wiki_password }}"
+    host: localhost
+    state: present
+    priv: "wikidatabase.*:ALL"
+
+#create wiki DB and User
+- name: Creating wikidatabase
+  mysql_db:
+    login_host: localhost
+    login_user: wiki
+    login_password: "{{ wiki_password }}"
+    name: wikidatabase
+    state: present
+
+#validate the creation of db and user privileges
+- name: Validate the creation of db
+  shell: mysql -e 'SHOW DATABASES;' | grep wikidatabase
+  register: dbstatus
+  failed_when: dbstatus.rc > 0
+  
+- name: Validate user grants
+  shell: mysql -e 'SHOW GRANTS FOR 'wiki'@'localhost';'
+  register: grantstatus
+  failed_when: grantstatus.rc > 0
+
+- name: Download Mediawiki
+  get_url:
+    url: "{{ download_url }}"
+    dest: "/tmp/{{ filename }}.tgz"
+    mode: 0744
+
+- name: Download the GPG signature for Mediawiki tarball
+  get_url:
+    url: "http://releases.wikimedia.org/mediawiki/1.34/{{ filename }}.tar.gz.sig"
+    dest: "/tmp/{{ filename }}.tgz.sig"
+
+- name: Download GPG keys
+  command: gpg --recv-key 9D3BB7B0
+
+- name: Verify Mediawiki tarball integrity
+  command: gpg --verify "/tmp/{{ filename }}.tgz.sig" "/tmp/{{ filename }}.tgz"
+
+- name: Unarchive Mediawiki
+  unarchive:
+    src: "/tmp/{{ filename }}.tgz"
+    dest: /tmp
+    copy: no
+    owner: "{{ wiki.user }}"
+    group: "{{ wiki.group }}"
+
+- name: Move Mediawiki to web dir
+  command: mv -f "/tmp/{{ filename }}" /var/www
+
+- name: Modify permission for Mediawiki directory
+  file:
+    path: "/var/www/{{ filename }}"
+    state: directory
+    owner: "{{ wiki.user }}"
+    group: "{{ wiki.group }}"
+    mode: 0775
+    recurse: yes
+
+- name: Setup Mediawiki symlink
+  file:
+    path: /var/www/mediawiki
+    src: "/var/www/{{ filename }}"
+    owner: "{{ wiki.user }}"
+    group: "{{ wiki.group }}"
+    mode: 0775
+    state: link
+    force: yes
+
+- name: Insert/update the configuration block in /etc/httpd/conf/httpd.conf
+  blockinfile:
+    path: /etc/httpd/conf/httpd.conf
+    block: |
+      DocumentRoot "/var/www/mediawiki"
+      <Directory "/var/www/mediawiki">
+         Options FollowSymLinks
+         AllowOverride None
+      </Directory>
+      DirectoryIndex index.html index.html.var index.php
+  notify:
+    - restart httpd
+
+- name: Get selinux
+  command: "getenforce"
+  register: result
+
+- name: Correct selinux configuration
+  command: "{{ item }}"
+  with_items:
+    - restorecon -FR "/var/www/{{ filename }}/"
+    - restorecon -FR /var/www/mediawiki
+  when: result.stdout == "Enforcing"

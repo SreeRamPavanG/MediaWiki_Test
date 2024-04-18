@@ -1,0 +1,90 @@
+-
+  name: Setting Up MediaWiki
+  hosts: mediawiki
+  become: yes
+  tasks:
+    - name: update the system
+      yum:
+        name: "*"
+        state: latest
+
+    - name: Install Required Packages
+      yum:
+        name: "{{ item }}"
+        state: present
+      with_items:
+        - httpd
+        - php 
+        - php-mysqlnd 
+        - php-gd 
+        - php-xml 
+        - mariadb-server 
+        - mariadb 
+        - php-mbstring 
+        - php-json 
+        - wget all
+        - firewd
+
+    - name: start httpd service
+      service:
+        name: httpd
+        state: started
+    
+    - name: enable httpd service
+      service:
+        name: httpd
+        enabled: yes
+
+    - name: start mariadb service
+      service:
+        name: mariadb
+        state: started
+
+    - name: Enable firewall
+      systemd:
+        name: firewalld
+        enabled: yes
+
+    - name: Start firewall
+      systemd:
+        name: firewalld
+        state: started
+    
+    - name: Download Mediawiki
+      get_url:
+        url: https://releases.wikimedia.org/mediawiki/1.24/mediawiki-1.24.2.tar.gz
+        dest: /tmp/
+        mode: 0777
+    
+    - name: Extract the Mediawiki file
+      unarchive: 
+        src: /tmp/mediawiki-1.24.2.tar.gz  
+        dest: /tmp/
+        remote_src: yes
+
+    - name: Move the mediawiki file
+      command: mv /tmp/mediawiki-1.24.2 /var/www/html/media
+
+    - name: Change the ownership of folder
+      command: chown -R apache:apache /var/www/html/media/
+    
+    - name: Update the permissions of folder
+      command: chmod 755 /var/www/html/media
+    
+    - name: Add port 80 firewall-cmd
+      command: firewall-cmd --permanent --add-port=80/tcp
+    
+    - name: reload service firewalld
+      systemd:
+        name: firewalld
+        state: reloaded
+    
+    - name: update the iptables
+      shell: iptables-save | grep 80
+      ignore_errors: yes
+
+    - name: run getenforce command
+      command: getenforce
+
+    - name: restore configuration
+      command: restorecon -r /var/www/html/media/

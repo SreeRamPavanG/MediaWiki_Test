@@ -1,0 +1,2 @@
+[mediawiki]
+public-ip-of-vm	ansible_hostname=testtwmediawiki
